@@ -440,6 +440,76 @@ static struct iz_cmd_event assoc_response_event[] = {
 	{},
 };
 
+/************************/
+/* POLL handling        */
+/************************/
+
+static iz_res_t poll_parse(struct iz_cmd *cmd)
+{
+	cmd->flags = NLM_F_REQUEST;
+	return IZ_CONT_OK;
+}
+
+static iz_res_t poll_request(struct iz_cmd *cmd, struct nl_msg *msg)
+{
+    uint16_t  short_addr;
+    char *dummy;
+    int ret;
+    unsigned char hwa[IEEE802154_ADDR_LEN];
+
+	if (!cmd->argv[1])
+		return IZ_STOP_ERR;
+	NLA_PUT_STRING(msg, IEEE802154_ATTR_DEV_NAME, cmd->argv[1]);
+
+	if (!cmd->argv[2])
+		return IZ_STOP_ERR;
+	if (cmd->argv[2][0] == 'H' || cmd->argv[2][0] == 'h') {
+		ret = parse_hw_addr(cmd->argv[2]+1, hwa);
+		if (ret) {
+			printf("Bad destination address!\n");
+			return IZ_STOP_ERR;
+		}
+		NLA_PUT(msg, IEEE802154_ATTR_DEST_HW_ADDR,
+			IEEE802154_ADDR_LEN, hwa);
+	} else {
+		short_addr = strtol(cmd->argv[2], &dummy, 16);
+		if (*dummy) {
+			printf("Bad destination address!\n");
+			return IZ_STOP_ERR;
+		}
+		NLA_PUT_U16(msg, IEEE802154_ATTR_DEST_SHORT_ADDR, short_addr);
+	}
+
+	printf("poll request\n");
+
+	return IZ_CONT_OK;
+
+nla_put_failure:
+	return IZ_STOP_ERR;
+}
+
+static iz_res_t poll_response(struct iz_cmd *cmd, struct genlmsghdr *ghdr, struct nlattr **attrs)
+{
+	printf("assoc response\n");
+	if (!attrs[IEEE802154_ATTR_SHORT_ADDR] ||
+		!attrs[IEEE802154_ATTR_STATUS] )
+		return IZ_STOP_ERR;
+
+	printf("Received short address %04hx, status %02hhx\n",
+		nla_get_u16(attrs[IEEE802154_ATTR_SHORT_ADDR]),
+		nla_get_u8(attrs[IEEE802154_ATTR_STATUS]));
+
+	return IZ_STOP_OK;
+}
+
+static struct iz_cmd_event poll_response_event[] = {
+	{
+		.call = poll_response,
+		.nl = IEEE802154_POLL_CONF,
+	},
+	{},
+};
+
 /*************************/
 /* DISASSOCIATE handling */
 /*************************/
@@ -537,6 +607,15 @@ const struct iz_module iz_mac = {
 		.parse		= assoc_parse,
 		.request	= assoc_request,
 		.response	= assoc_response_event,
+	},
+    {
+		.name		= "poll",
+		.usage		= "<iface> <addr>",
+		.doc		= "poll coordinator for pending data",
+		.nl_cmd		= IEEE802154_POLL_REQ,
+		.parse		= poll_parse,
+		.request	= poll_request,
+		.response	= poll_response_event,
 	},
 	{
 		.name		= "disassoc",
